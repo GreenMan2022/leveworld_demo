@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Прозрачный шар с лего-героями</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#0a0a12; font-family: sans-serif; }
+  canvas { display:block; }
+
+  .hint {
+    position:fixed; bottom:16px; width:100%; text-align:center;
+    color:rgba(255,255,255,0.5); font-size:14px;
+    pointer-events:none; transition:opacity .3s;
+  }
+
+  #chatlog {
+    position:fixed; left:16px; bottom:16px;
+    width:250px; max-height:32vh; overflow-y:auto;
+    padding:8px 10px;
+    background:rgba(20,20,35,0.5);
+    border:1px solid rgba(120,170,255,0.2);
+    border-radius:10px;
+    color:#dfe8ff; font-size:12px; line-height:1.5;
+    backdrop-filter: blur(6px);
+    pointer-events:none; transition:opacity .35s;
+  }
+  #chatlog .row { display:flex; gap:6px; align-items:baseline; margin-bottom:3px; }
+  #chatlog .dot { width:7px; height:7px; border-radius:50%; flex:none; transform: translateY(-1px); }
+  #chatlog .name { color:#8fb7ff; font-weight:600; }
+  #chatlog .msg  { color:#eaefff; }
+
+  #inspect {
+    position:fixed; top:50%; left:50%;
+    transform: translate(160px, -50%) translateX(30px);
+    width:270px; padding:20px 22px;
+    background:rgba(15,18,32,0.85);
+    border:1px solid rgba(120,170,255,0.35);
+    border-radius:16px;
+    color:#eaefff;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 20px 70px rgba(0,0,0,0.65);
+    opacity:0; pointer-events:none;
+    transition: opacity .4s, transform .4s;
+  }
+  #inspect.show {
+    opacity:1; transform: translate(160px, -50%) translateX(0); pointer-events:auto;
+  }
+  #inspect h2 {
+    margin:0 0 2px; font-size:19px;
+    display:flex; align-items:center; gap:10px;
+  }
+  #inspect .swatch {
+    width:18px; height:18px; border-radius:50%;
+    border:2px solid rgba(255,255,255,0.4); flex:none;
+  }
+  #inspect .subtitle {
+    color:#8fa8cf; font-size:12px; margin-bottom:16px;
+  }
+  #inspect .subtitle b { color:#ffd54f; }
+  #inspect .subtitle .prof { color:#8fe6ff; font-weight:600; }
+
+  .stat { margin-bottom:12px; }
+  .stat .head {
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:13px; color:#c8d6f0; margin-bottom:5px;
+  }
+  .stat .head .val {
+    font-weight:700; color:#fff; font-variant-numeric: tabular-nums;
+  }
+  .stat .bar {
+    height:6px; border-radius:4px;
+    background:rgba(255,255,255,0.08); overflow:hidden;
+  }
+  .stat .bar > i {
+    display:block; height:100%; width:0%;
+    border-radius:4px;
+    transition: width 0.9s cubic-bezier(.2,.8,.2,1);
+    background: linear-gradient(90deg, #4f8cff, #8fb7ff);
+  }
+  .stat.hp .bar > i { background: linear-gradient(90deg, #ff3b30, #ff8c84); }
+  .stat.str .bar > i { background: linear-gradient(90deg, #ff9500, #ffcc55); }
+  .stat.agi .bar > i { background: linear-gradient(90deg, #34c759, #8fe6a8); }
+  .stat.spd .bar > i { background: linear-gradient(90deg, #00c7be, #7fe8e2); }
+  .stat.int .bar > i { background: linear-gradient(90deg, #af52de, #d59cff); }
+
+  #inspect button {
+    width:100%; margin-top:16px; padding:10px 12px;
+    background:linear-gradient(180deg,#4f8cff,#2f6ae0);
+    color:#fff; border:none; border-radius:10px;
+    font-size:14px; font-weight:600; cursor:pointer;
+    transition: filter .2s;
+  }
+  #inspect button:hover { filter:brightness(1.15); }
+
+  #dimmer {
+    position:fixed; inset:0;
+    background: radial-gradient(circle at 50% 55%, rgba(20,30,60,0.2), rgba(5,8,20,0.85));
+    opacity:0; pointer-events:none; transition:opacity .45s;
+    z-index:-1;
+  }
+  #dimmer.show { opacity:1; }
+</style>
+</head>
+<body>
+<div class="hint" id="hint">Тяни — вращать · Клик по человечку — снять с шара</div>
+<div id="dimmer"></div>
+<div id="chatlog"></div>
+
+<div id="inspect">
+  <h2><span class="swatch" id="ins-swatch"></span><span id="ins-name">—</span></h2>
+  <div class="subtitle"><span class="prof" id="ins-prof">—</span> · Уровень <b id="ins-lvl">—</b></div>
+
+  <div class="stat hp"><div class="head"><span>HP</span><span class="val" id="val-hp">0</span></div><div class="bar"><i id="bar-hp"></i></div></div>
+  <div class="stat str"><div class="head"><span>Сила</span><span class="val" id="val-str">0</span></div><div class="bar"><i id="bar-str"></i></div></div>
+  <div class="stat agi"><div class="head"><span>Ловкость</span><span class="val" id="val-agi">0</span></div><div class="bar"><i id="bar-agi"></i></div></div>
+  <div class="stat spd"><div class="head"><span>Скорость</span><span class="val" id="val-spd">0</span></div><div class="bar"><i id="bar-spd"></i></div></div>
+  <div class="stat int"><div class="head"><span>Интеллект</span><span class="val" id="val-int">0</span></div><div class="bar"><i id="bar-int"></i></div></div>
+
+  <button id="ins-close">Поставить обратно</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 1000);
+camera.position.set(0, 0, 6);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const group = new THREE.Group();
+scene.add(group);
+const R = 1.6;
+
+// --- Стеклянный шар ---
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color:0xffffff, metalness:0, roughness:0.05,
+  transmission:1, thickness:1.5, ior:1.45,
+  clearcoat:1, clearcoatRoughness:0,
+  transparent:true, opacity:1, side:THREE.DoubleSide
+});
+group.add(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 64), glassMat));
+
+group.add(new THREE.Mesh(
+  new THREE.SphereGeometry(R * 0.97, 24, 16),
+  new THREE.MeshBasicMaterial({ color:0x66ccff, wireframe:true, transparent:true, opacity:0.3 })
+));
+
+group.add(new THREE.Mesh(
+  new THREE.SphereGeometry(R, 32, 32),
+  new THREE.MeshBasicMaterial({ color:0xaaddff, wireframe:true, transparent:true, opacity:0.12 })
+));
+
+// --- Свет ---
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const l1 = new THREE.PointLight(0x88ccff, 2, 100); l1.position.set(5,5,5); scene.add(l1);
+const l2 = new THREE.PointLight(0xff88cc, 2, 100); l2.position.set(-5,-3,4); scene.add(l2);
+const l3 = new THREE.DirectionalLight(0xffffff, 1.2); l3.position.set(0,0,10); scene.add(l3);
+
+/* =========================================================
+   МАТЕРИАЛ-ХЕЛПЕР
+   ========================================================= */
+const M = (color, opts = {}) => new THREE.MeshStandardMaterial({
+  color, roughness: opts.roughness ?? 0.6, metalness: opts.metalness ?? 0,
+  emissive: opts.emissive ?? 0x000000, emissiveIntensity: opts.emissiveIntensity ?? 1,
+  ...opts
+});
+
+/* =========================================================
+   СПРАЙТ-ТАБЛИЧКА С НИКОМ, ПРОФЕССИЕЙ И УРОВНЕМ
+   ========================================================= */
+function makeNameTagSprite(name, profession, level, color) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const W = 560, H = 160;
+  canvas.width = W; canvas.height = H;
+
+  const bx = 30, by = 20, bw = W - 60, bh = 120, r = 24;
+  function roundRect(x, y, w, h, rr) {
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.arcTo(x + w, y,     x + w, y + h, rr);
+    ctx.arcTo(x + w, y + h, x,     y + h, rr);
+    ctx.arcTo(x,     y + h, x,     y,     rr);
+    ctx.arcTo(x,     y,     x + w, y,     rr);
+    ctx.closePath();
+  }
+
+  ctx.fillStyle = 'rgba(10,14,26,0.78)';
+  roundRect(bx, by, bw, bh, r);
+  ctx.fill();
+
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#' + color.toString(16).padStart(6, '0');
+  roundRect(bx, by, bw, bh, r);
+  ctx.stroke();
+
+  // имя — крупно, по центру, чуть выше
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 40px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(name, W / 2, by + 42);
+
+  // под ним: профессия (цветом) · lv N
+  ctx.font = 'bold 26px Arial';
+  ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+  const profText = profession + '  ·  lv ' + level;
+  ctx.fillText(profText, W / 2, by + 90);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(0.72, 0.21, 1);
+  return sprite;
+}
+
+/* =========================================================
+   КОСТЮМЫ: наборы аксессуаров, которые добавляются поверх тела
+   Каждый костюм — функция, получающая группу человечка и цвета
+   ========================================================= */
+const COSTUMES = {
+
+  /* -------- ДОКТОР -------- */
+  doctor: (man) => {
+    // белый халат (торс белый, поверх цветного)
+    man.userData.torso.material = M(0xf4f7ff, { roughness: 0.7 });
+    // крестик на груди
+    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.08, 0.005), M(0xff3b30));
+    crossV.position.set(0, 0.17, 0.05); man.add(crossV);
+    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.005), M(0xff3b30));
+    crossH.position.set(0, 0.17, 0.05); man.add(crossH);
+    // шапочка-медколпак
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.082, 0.082, 0.03, 16), M(0xf4f7ff));
+    cap.position.y = 0.36; man.add(cap);
+    // крестик на шапочке
+    const capCross = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.03, 0.05), M(0xff3b30));
+    capCross.position.set(0, 0.375, 0); capCross.rotation.y = Math.PI/2; man.add(capCross);
+    // фонендоскоп — тонкая трубочка на шее
+    const steth = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.008, 8, 20, Math.PI), M(0x2a2a2a));
+    steth.position.y = 0.24; steth.rotation.x = Math.PI/2; steth.rotation.z = Math.PI; man.add(steth);
+  },
+
+  /* -------- РЫЦАРЬ -------- */
+  knight: (man) => {
+    // серый металл торса
+    man.userData.torso.material = M(0x9aa3b2, { roughness: 0.35, metalness: 0.7 });
+    // шлем вместо головы-цилиндра
+    const helm = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.13, 16), M(0x9aa3b2, { roughness: 0.3, metalness: 0.8 }));
+    helm.position.y = 0.31; man.add(helm);
+    // забрало (полоска-щель)
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.02, 0.06), M(0x1b1f26));
+    visor.position.set(0, 0.31, 0.05); man.add(visor);
+    // плюмаж красный
+    const plume = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.07, 8), M(0xff3b30));
+    plume.position.y = 0.41; man.add(plume);
+    // меч в правой руке
+    const sword = new THREE.Group();
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.22, 0.004), M(0xd0d6e0, { metalness:0.9, roughness:0.2 }));
+    blade.position.y = 0.13; sword.add(blade);
+    const hilt = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.014, 0.02), M(0x8a6b3d));
+    hilt.position.y = 0.0; sword.add(hilt);
+    const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), M(0xffcc00, { metalness:0.8, roughness:0.2 }));
+    pommel.position.y = -0.03; sword.add(pommel);
+    sword.position.set(0.14, 0.16, 0.02);
+    sword.rotation.z = -0.1;
+    man.add(sword);
+    // щит в левой руке
+    const shield = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.014, 16), M(0x2f6ae0, { metalness:0.5, roughness:0.4 }));
+    shield.rotation.z = Math.PI/2; shield.rotation.y = Math.PI/2;
+    shield.position.set(-0.14, 0.16, 0.02);
+    man.add(shield);
+    // умбон в центре щита
+    const boss = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 8), M(0xffcc00, { metalness:0.8, roughness:0.2 }));
+    boss.position.set(-0.15, 0.16, 0.02); man.add(boss);
+  },
+
+  /* -------- ВОЛШЕБНИК -------- */
+  wizard: (man) => {
+    // синяя мантия
+    man.userData.torso.material = M(0x3a5bd9, { roughness: 0.8 });
+    // остроконечная шляпа
+    const hatCone = new THREE.Mesh(new THREE.ConeGeometry(0.085, 0.22, 16), M(0x3a5bd9));
+    hatCone.position.y = 0.45; man.add(hatCone);
+    // поля шляпы
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.014, 20), M(0x3a5bd9));
+    brim.position.y = 0.36; man.add(brim);
+    // звёздочки на шляпе
+    for (let i = 0; i < 3; i++) {
+      const star = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 6), M(0xffcc00, { emissive:0xffcc00, emissiveIntensity:0.8 }));
+      star.position.set(Math.cos(i*2.1)*0.03, 0.42 + i*0.04, Math.sin(i*2.1)*0.03);
+      man.add(star);
+    }
+    // борода белая
+    const beard = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.09, 8), M(0xf0f0f0, { roughness: 0.9 }));
+    beard.position.set(0, 0.26, 0.055); beard.rotation.x = Math.PI; man.add(beard);
+    // волшебный посох
+    const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.4, 8), M(0x6b4a2a));
+    staff.position.set(0.16, 0.15, 0.02); man.add(staff);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.025, 12, 12),
+      new THREE.MeshStandardMaterial({ color:0x8fe6ff, emissive:0x4fd8ff, emissiveIntensity:1.2, roughness:0.2 }));
+    orb.position.set(0.16, 0.36, 0.02); man.add(orb);
+  },
+
+  /* -------- КОСМОНАВТ -------- */
+  astronaut: (man) => {
+    // белый скафандр
+    man.userData.torso.material = M(0xf2f4f8, { roughness: 0.5 });
+    // шлем — прозрачная сфера поверх головы
+    const visor = new THREE.Mesh(
+      new THREE.SphereGeometry(0.10, 20, 16),
+      new THREE.MeshPhysicalMaterial({
+        color:0x88ccff, transmission:1, thickness:0.5, roughness:0.05,
+        metalness:0, transparent:true, opacity:0.6, side:THREE.DoubleSide
+      })
+    );
+    visor.position.y = 0.315; man.add(visor);
+    // окантовка шлема
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.10, 0.012, 8, 20), M(0xd8dde5));
+    ring.rotation.x = Math.PI/2; ring.position.y = 0.24; man.add(ring);
+    // кислородный баллон за спиной
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.16, 12), M(0xd8dde5));
+    tank.position.set(0, 0.16, -0.08); man.add(tank);
+    // красные нашивки
+    const patch = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.004), M(0xff3b30));
+    patch.position.set(-0.05, 0.18, 0.046); man.add(patch);
+    const patch2 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.004), M(0x007aff));
+    patch2.position.set(0.06, 0.12, 0.046); man.add(patch2);
+  },
+
+  /* -------- ПИРАТ -------- */
+  pirate: (man) => {
+    // полосатая тельняшка (красный торс)
+    man.userData.torso.material = M(0xd23c3c, { roughness: 0.7 });
+    // бандана
+    const bandana = new THREE.Mesh(new THREE.SphereGeometry(0.086, 16, 8, 0, Math.PI*2, 0, Math.PI/2), M(0x111111));
+    bandana.position.y = 0.36; man.add(bandana);
+    // повязка на глаз
+    const patch = new THREE.Mesh(new THREE.CircleGeometry(0.024, 12), M(0x000000));
+    patch.position.set(-0.045, 0.315, 0.072); man.add(patch);
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.012, 0.006), M(0x111111));
+    strap.position.set(0, 0.34, 0.05); strap.rotation.z = 0.15; man.add(strap);
+    // сабля в правой руке
+    const sabre = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.20, 0.004), M(0xd0d6e0, { metalness:0.9, roughness:0.2 }));
+    sabre.position.set(0.14, 0.18, 0.02); sabre.rotation.z = 0.25; man.add(sabre);
+    const guard = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.005, 8, 12), M(0xffcc00, { metalness:0.8 }));
+    guard.position.set(0.14, 0.09, 0.02); guard.rotation.y = Math.PI/2; man.add(guard);
+    // деревянная нога
+    man.userData.legL.material = M(0x6b4a2a);
+    man.userData.legL.geometry = new THREE.CylinderGeometry(0.022, 0.022, 0.16, 8);
+  },
+
+  /* -------- НИНДЗЯ -------- */
+  ninja: (man) => {
+    // чёрный костюм
+    man.userData.torso.material = M(0x1b1f26, { roughness: 0.7 });
+    man.userData.armL.material = M(0x1b1f26);
+    man.userData.armR.material = M(0x1b1f26);
+    // маска на голове
+    const mask = new THREE.Mesh(new THREE.CylinderGeometry(0.078, 0.078, 0.12, 16), M(0x1b1f26));
+    mask.position.y = 0.31; man.add(mask);
+    // глаза-полоска
+    const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.014, 0.06), M(0xffe0a0, { emissive:0xffb060, emissiveIntensity:0.6 }));
+    eyes.position.set(0, 0.32, 0.03); man.add(eyes);
+    // красный пояс
+    const belt = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.02, 0.10), M(0xd23c3c));
+    belt.position.y = 0.08; man.add(belt);
+    // сюрикен в руке
+    const star = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.004, 4), M(0xb0b8c2, { metalness:0.8, roughness:0.3 }));
+    star.position.set(0.14, 0.22, 0.03); star.rotation.z = 0.4; man.add(star);
+  },
+
+  /* -------- КОВБОЙ -------- */
+  cowboy: (man) => {
+    // коричневая рубашка
+    man.userData.torso.material = M(0x8a5a3b, { roughness: 0.8 });
+    // шляпа — поля + тулья
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.012, 20), M(0x6b4a2a));
+    brim.position.y = 0.36; man.add(brim);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.085, 0.08, 16), M(0x6b4a2a));
+    top.position.y = 0.40; man.add(top);
+    // ленточка на шляпе
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.076, 0.086, 0.014, 16), M(0x111111));
+    band.position.y = 0.385; man.add(band);
+    // шейный платок
+    const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 16), M(0xd23c3c));
+    scarf.rotation.x = Math.PI/2; scarf.position.y = 0.235; man.add(scarf);
+    // лассо на боку
+    const lasso = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.006, 8, 20), M(0xd9b27c));
+    lasso.position.set(-0.09, 0.12, 0); lasso.rotation.y = Math.PI/2; man.add(lasso);
+  },
+
+  /* -------- ПОВАР -------- */
+  chef: (man) => {
+    // белый китель
+    man.userData.torso.material = M(0xf7f8fb, { roughness: 0.7 });
+    // пуговицы
+    for (let i = 0; i < 3; i++) {
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.007, 6, 6), M(0x111111));
+      b.position.set(0.0, 0.19 - i*0.04, 0.048); man.add(b);
+    }
+    // поварской колпак — цилиндр + пухлая сфера
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.06, 16), M(0xffffff));
+    base.position.y = 0.38; man.add(base);
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.085, 16, 12), M(0xffffff));
+    puff.position.y = 0.44; man.add(puff);
+    // половник в руке
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.14, 8), M(0x6b4a2a));
+    handle.position.set(0.14, 0.18, 0.02); man.add(handle);
+    const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.024, 12, 8, 0, Math.PI*2, 0, Math.PI/2), M(0xb0b8c2, { metalness:0.8, roughness:0.25 }));
+    bowl.position.set(0.14, 0.25, 0.02); bowl.rotation.x = Math.PI; man.add(bowl);
+  },
+
+  /* -------- УЧЁНЫЙ -------- */
+  scientist: (man) => {
+    // белый халат
+    man.userData.torso.material = M(0xeef2f8, { roughness: 0.75 });
+    // очки
+    const glasses = new THREE.Group();
+    const rimL = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.003, 6, 16), M(0x222831));
+    rimL.position.set(-0.032, 0.315, 0.072); glasses.add(rimL);
+    const rimR = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.003, 6, 16), M(0x222831));
+    rimR.position.set(0.032, 0.315, 0.072); glasses.add(rimR);
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.003, 0.003), M(0x222831));
+    bridge.position.set(0, 0.315, 0.074); glasses.add(bridge);
+    man.add(glasses);
+    // колба с зелёной жидкостью в руке
+    const flask = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.028, 0.08, 12),
+      new THREE.MeshPhysicalMaterial({
+        color:0xbff0ff, transmission:1, thickness:0.4, roughness:0.05,
+        transparent:true, opacity:0.85, side:THREE.DoubleSide
+      }));
+    flask.position.set(0.14, 0.20, 0.03); man.add(flask);
+    const liquid = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.026, 0.04, 12),
+      new THREE.MeshStandardMaterial({ color:0x34c759, emissive:0x34c759, emissiveIntensity:0.4, roughness:0.4 }));
+    liquid.position.set(0.14, 0.18, 0.03); man.add(liquid);
+    // волосы-взрыв
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), M(0xdfdfdf));
+    hair.scale.set(1, 0.5, 1);
+    hair.position.y = 0.37; man.add(hair);
+  },
+
+  /* -------- КОРОЛЬ -------- */
+  king: (man) => {
+    // пурпурная мантия
+    man.userData.torso.material = M(0x8a2f8a, { roughness: 0.7, metalness:0.1 });
+    // корона
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.05, 16, 1, true), M(0xffcc00, { metalness:0.9, roughness:0.2 }));
+    crown.position.y = 0.375; man.add(crown);
+    // зубцы короны
+    for (let i = 0; i < 6; i++) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.03, 6), M(0xffcc00, { metalness:0.9, roughness:0.2 }));
+      const a = (i / 6) * Math.PI * 2;
+      spike.position.set(Math.cos(a)*0.075, 0.415, Math.sin(a)*0.075);
+      man.add(spike);
+    }
+    // большой рубин спереди короны
+    const ruby = new THREE.Mesh(new THREE.OctahedronGeometry(0.014),
+      new THREE.MeshStandardMaterial({ color:0xff2d55, emissive:0x661020, emissiveIntensity:0.6, metalness:0.6, roughness:0.2 }));
+    ruby.position.set(0, 0.38, 0.085); man.add(ruby);
+    // горностаевая опушка (белая полоса внизу торса)
+    const fur = new THREE.Mesh(new THREE.BoxGeometry(0.165, 0.02, 0.095), M(0xf4f4f4, { roughness:0.95 }));
+    fur.position.y = 0.06; man.add(fur);
+    // скипетр в руке
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.22, 8), M(0xffcc00, { metalness:0.9, roughness:0.2 }));
+    rod.position.set(0.14, 0.20, 0.02); man.add(rod);
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 10), M(0xff2d55, { emissive:0x661020, emissiveIntensity:0.5 }));
+    orb.position.set(0.14, 0.33, 0.02); man.add(orb);
+  }
+};
+
+/* =========================================================
+   ЛЕГО-ЧЕЛОВЕЧЕК
+   ========================================================= */
+function makeLegoMan(bodyColor, headColor = 0xffd54f) {
+  const man = new THREE.Group();
+
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, 0.2, 0.09),
+    M(bodyColor, { roughness: 0.6 })
+  );
+  torso.position.y = 0.15; man.add(torso);
+
+  const headMat = M(headColor, { roughness: 0.6 });
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.11, 16), headMat);
+  head.position.y = 0.31; man.add(head);
+
+  const stud = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.02, 16), headMat);
+  stud.position.y = 0.375; man.add(stud);
+
+  const armMat = M(bodyColor, { roughness: 0.6 });
+  const armGeo = new THREE.BoxGeometry(0.05, 0.18, 0.05);
+  const armL = new THREE.Mesh(armGeo, armMat);
+  armL.position.set(-0.11, 0.16, 0); armL.rotation.z = 0.25; man.add(armL);
+  const armR = new THREE.Mesh(armGeo, armMat);
+  armR.position.set(0.11, 0.16, 0); armR.rotation.z = -0.25; man.add(armR);
+
+  const legMat = M(0x2a2a2a, { roughness: 0.7 });
+  const legGeo = new THREE.BoxGeometry(0.055, 0.16, 0.055);
+  const legL = new THREE.Mesh(legGeo, legMat);
+  legL.position.set(-0.04, -0.01, 0); man.add(legL);
+  const legR = new THREE.Mesh(legGeo, legMat);
+  legR.position.set(0.04, -0.01, 0); man.add(legR);
+
+  const hip = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.09), legMat);
+  hip.position.y = 0.04; man.add(hip);
+
+  const hit = new THREE.Mesh(
+    new THREE.SphereGeometry(0.15, 8, 8),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  hit.position.y = 0.18;
+  man.add(hit);
+  man.userData.hitbox = hit;
+
+  // ссылки для костюмов
+  man.userData.torso = torso;
+  man.userData.armL = armL;
+  man.userData.armR = armR;
+  man.userData.legL = legL;
+  man.userData.legR = legR;
+  man.userData.head = head;
+
+  return man;
+}
+
+/* =========================================================
+   ХАРАКТЕРИСТИКИ
+   ========================================================= */
+function generateStats(seed) {
+  let s = seed >>> 0;
+  const rnd = () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return (s / 4294967296);
+  };
+  return {
+    hp:  Math.round(60 + rnd() * 140),
+    str: Math.round(20 + rnd() * 80),
+    agi: Math.round(20 + rnd() * 80),
+    spd: Math.round(20 + rnd() * 80),
+    int: Math.round(20 + rnd() * 80)
+  };
+}
+
+/* =========================================================
+   10 ГЕРОЕВ С ПРОФЕССИЯМИ
+   ========================================================= */
+const manData = [
+  { theta: 0.00,           phi: 0.30,          color: 0x8fe6ff, name: 'Иван',     prof: 'Доктор',     key: 'doctor',    lvl: 99 },
+  { theta: Math.PI * 0.5,  phi: Math.PI * 0.35, color: 0x9aa3b2, name: 'Максим',   prof: 'Рыцарь',     key: 'knight',    lvl: 42 },
+  { theta: Math.PI,        phi: Math.PI * 0.40, color: 0x3a5bd9, name: 'Ольга',    prof: 'Волшебник',  key: 'wizard',    lvl: 78 },
+  { theta: Math.PI * 1.5,  phi: Math.PI * 0.55, color: 0xf2f4f8, name: 'Дмитрий',  prof: 'Космонавт',  key: 'astronaut', lvl: 15 },
+  { theta: Math.PI * 0.25, phi: Math.PI * 0.65, color: 0xd23c3c, name: 'Анна',     prof: 'Пират',      key: 'pirate',    lvl: 63 },
+  { theta: Math.PI * 0.80, phi: Math.PI * 0.72, color: 0x1b1f26, name: 'Сергей',   prof: 'Ниндзя',     key: 'ninja',     lvl: 27 },
+  { theta: Math.PI * 1.30, phi: Math.PI * 0.50, color: 0x8a5a3b, name: 'Елена',    prof: 'Ковбой',     key: 'cowboy',    lvl: 88 },
+  { theta: Math.PI * 1.75, phi: Math.PI * 0.80, color: 0xf7f8fb, name: 'Павел',    prof: 'Повар',      key: 'chef',      lvl: 51 },
+  { theta: Math.PI * 0.10, phi: Math.PI * 0.90, color: 0xeef2f8, name: 'Мария',    prof: 'Учёный',     key: 'scientist', lvl: 34 },
+  { theta: Math.PI * 0.95, phi: Math.PI * 0.95, color: 0x8a2f8a, name: 'Николай',  prof: 'Король',     key: 'king',      lvl: 72 }
+];
+
+const legoMen = [];
+
+manData.forEach(({ theta, phi, color, name, prof, key, lvl }, idx) => {
+  const x = R * Math.sin(phi) * Math.cos(theta);
+  const y = R * Math.cos(phi);
+  const z = R * Math.sin(phi) * Math.sin(theta);
+
+  const man = makeLegoMan(color);
+  man.position.set(x, y, z);
+
+  const up = new THREE.Vector3(x, y, z).normalize();
+  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0), up);
+  man.quaternion.copy(quat);
+  man.position.addScaledVector(up, 0.02);
+  man.rotateY(theta * 2 + Math.sin(phi * 5) * 1.5);
+
+  // --- применяем костюм ---
+  if (COSTUMES[key]) COSTUMES[key](man);
+
+  man.userData.color    = color;
+  man.userData.name     = name;
+  man.userData.prof     = prof;
+  man.userData.level    = lvl;
+  man.userData.up       = up.clone();
+  man.userData.homePos  = man.position.clone();
+  man.userData.homeQuat = man.quaternion.clone();
+  man.userData.state    = 'idle';
+  man.userData.stats    = generateStats(idx * 7919 + 12345);
+
+  // табличка с ником, профессией и уровнем
+  const tag = makeNameTagSprite(name, prof, lvl, color);
+  tag.position.set(0, 0.66, 0);
+  man.add(tag);
+  man.userData.nameTag = tag;
+
+  group.add(man);
+  legoMen.push(man);
+});
+
+/* =========================================================
+   КЛИК → СНЯТЬ С ШАРА
+   ========================================================= */
+const raycaster = new THREE.Raycaster();
+const mouseNDC = new THREE.Vector2();
+
+function screenToNDC(x, y) {
+  mouseNDC.x = (x / innerWidth) * 2 - 1;
+  mouseNDC.y = -(y / innerHeight) * 2 + 1;
+}
+function pickMan(clientX, clientY) {
+  screenToNDC(clientX, clientY);
+  raycaster.setFromCamera(mouseNDC, camera);
+  const hits = raycaster.intersectObjects(legoMen, true);
+  if (!hits.length) return null;
+  let obj = hits[0].object;
+  while (obj && !legoMen.includes(obj)) obj = obj.parent;
+  return obj;
+}
+
+let liftedMan = null;
+let liftAnim  = null;
+let groupAnim = null;
+
+const FRONT_TARGET = new THREE.Vector3(-0.6, -0.15, 3.0);
+
+const inspectEl = document.getElementById('inspect');
+const dimmerEl  = document.getElementById('dimmer');
+const chatlogEl = document.getElementById('chatlog');
+const hintEl    = document.getElementById('hint');
+const insName   = document.getElementById('ins-name');
+const insSwatch = document.getElementById('ins-swatch');
+const insProf   = document.getElementById('ins-prof');
+const insLvl    = document.getElementById('ins-lvl');
+
+const colorHex = c => '#' + c.toString(16).padStart(6, '0');
+
+const statRefs = {
+  hp:  { val: document.getElementById('val-hp'),  bar: document.getElementById('bar-hp')  },
+  str: { val: document.getElementById('val-str'), bar: document.getElementById('bar-str') },
+  agi: { val: document.getElementById('val-agi'), bar: document.getElementById('bar-agi') },
+  spd: { val: document.getElementById('val-spd'), bar: document.getElementById('bar-spd') },
+  int: { val: document.getElementById('val-int'), bar: document.getElementById('bar-int') }
+};
+
+let statTimers = [];
+function resetStats() {
+  statTimers.forEach(t => clearTimeout(t));
+  statTimers = [];
+  Object.values(statRefs).forEach(({ val, bar }) => {
+    val.textContent = '0'; bar.style.width = '0%';
+  });
+}
+function animateStat(key, value, max, delay) {
+  const { val, bar } = statRefs[key];
+  const t = setTimeout(() => {
+    const t0 = performance.now(), dur = 900;
+    const tick = () => {
+      const k = Math.min((performance.now() - t0) / dur, 1);
+      const e = k < 0.5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2)/2;
+      val.textContent = Math.round(value * e);
+      if (k < 1) requestAnimationFrame(tick);
+      else val.textContent = value;
+    };
+    tick();
+    bar.style.width = Math.min(100, (value / max) * 100) + '%';
+  }, delay);
+  statTimers.push(t);
+}
+function showStats(man) {
+  resetStats();
+  const s = man.userData.stats;
+  animateStat('hp',  s.hp,  200, 120);
+  animateStat('str', s.str, 100, 220);
+  animateStat('agi', s.agi, 100, 320);
+  animateStat('spd', s.spd, 100, 420);
+  animateStat('int', s.int, 100, 520);
+}
+
+function liftMan(man) {
+  if (liftedMan === man) return;
+  if (liftedMan) returnMan(true);
+
+  liftedMan = man;
+  man.userData.state = 'lifting';
+
+  const startWorldPos  = new THREE.Vector3();
+  const startWorldQuat = new THREE.Quaternion();
+  man.getWorldPosition(startWorldPos);
+  man.getWorldQuaternion(startWorldQuat);
+
+  group.remove(man);
+  scene.add(man);
+  man.position.copy(startWorldPos);
+  man.quaternion.copy(startWorldQuat);
+  man.scale.setScalar(1);
+
+  const faceQuat = new THREE.Quaternion();
+  const duration = 850;
+  const startTime = performance.now();
+  const startPos  = startWorldPos.clone();
+  const startQuat = startWorldQuat.clone();
+  const targetScale = 3.2;
+
+  liftAnim = () => {
+    const t = Math.min((performance.now() - startTime) / duration, 1);
+    const e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+    man.position.lerpVectors(startPos, FRONT_TARGET, e);
+    man.quaternion.copy(startQuat.clone().slerp(faceQuat, e));
+    man.scale.setScalar(1 + (targetScale - 1) * e);
+    if (t >= 1) { man.userData.state = 'lifted'; liftAnim = null; }
+  };
+
+  const sphereStart = group.position.clone();
+  const sphereEnd   = new THREE.Vector3(0, 0, -2.2);
+  const glassStart  = glassMat.opacity;
+  const wireSphere = group.children[1];
+  const contourSphere = group.children[2];
+  const wireStart   = wireSphere.material.opacity;
+  const contourStart = contourSphere.material.opacity;
+
+  const gStart = performance.now();
+  groupAnim = () => {
+    const t = Math.min((performance.now() - gStart) / duration, 1);
+    const e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+    group.position.lerpVectors(sphereStart, sphereEnd, e);
+    glassMat.opacity = glassStart * (1 - e * 0.75);
+    wireSphere.material.opacity = wireStart * (1 - e * 0.7);
+    contourSphere.material.opacity = contourStart * (1 - e * 0.7);
+    if (t >= 1) groupAnim = null;
+  };
+
+  insName.textContent = man.userData.name;
+  insSwatch.style.background = colorHex(man.userData.color);
+  insProf.textContent = man.userData.prof;
+  insLvl.textContent = man.userData.level;
+  inspectEl.classList.add('show');
+  dimmerEl.classList.add('show');
+  chatlogEl.style.opacity = '0.1';
+  hintEl.style.opacity = '0';
+  showStats(man);
+}
+
+function returnMan(instant = false) {
+  if (!liftedMan) return;
+  const man = liftedMan;
+  man.userData.state = 'returning';
+
+  const duration = instant ? 0 : 750;
+  const startTime = performance.now();
+
+  const startPos   = man.position.clone();
+  const startQuat  = man.quaternion.clone();
+  const startScale = man.scale.clone();
+
+  group.updateMatrixWorld();
+  const homeWorld = man.userData.homePos.clone().applyMatrix4(group.matrixWorld);
+  const homeQuat  = man.userData.homeQuat.clone().premultiply(group.quaternion);
+
+  const sphereStart = group.position.clone();
+  const sphereEnd   = new THREE.Vector3(0, 0, 0);
+  const glassStart  = glassMat.opacity;
+  const wireSphere = group.children[1];
+  const contourSphere = group.children[2];
+  const wireStart   = wireSphere.material.opacity;
+  const contourStart = contourSphere.material.opacity;
+
+  liftAnim = () => {
+    const t = duration === 0 ? 1 : Math.min((performance.now() - startTime) / duration, 1);
+    const e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2;
+    man.position.lerpVectors(startPos, homeWorld, e);
+    man.quaternion.copy(startQuat.clone().slerp(homeQuat, e));
+    man.scale.setScalar(startScale.x + (1 - startScale.x) * e);
+    group.position.lerpVectors(sphereStart, sphereEnd, e);
+    glassMat.opacity = glassStart + (1 - glassStart) * e;
+    wireSphere.material.opacity = wireStart + (0.3 - wireStart) * e;
+    contourSphere.material.opacity = contourStart + (0.12 - contourStart) * e;
+    if (t >= 1) {
+      scene.remove(man);
+      group.add(man);
+      man.position.copy(man.userData.homePos);
+      man.quaternion.copy(man.userData.homeQuat);
+      man.scale.setScalar(1);
+      man.userData.state = 'idle';
+      liftAnim = null;
+      liftedMan = null;
+    }
+  };
+
+  inspectEl.classList.remove('show');
+  dimmerEl.classList.remove('show');
+  chatlogEl.style.opacity = '1';
+  hintEl.style.opacity = '1';
+}
+
+document.getElementById('ins-close').addEventListener('click', () => returnMan());
+
+/* =========================================================
+   МЫШЬ
+   ========================================================= */
+let dragging = false, prevX = 0, prevY = 0;
+let velX = 0, velY = 0;
+let downX = 0, downY = 0, moved = false;
+
+function onDown(x, y) {
+  if (liftedMan) return;
+  dragging = true; prevX = x; prevY = y;
+  downX = x; downY = y; moved = false;
+}
+function onMove(x, y) {
+  if (!dragging) return;
+  const dx = x - prevX, dy = y - prevY;
+  if (Math.abs(x - downX) > 5 || Math.abs(y - downY) > 5) moved = true;
+  group.rotation.y += dx * 0.01;
+  group.rotation.x += dy * 0.01;
+  velY = dx * 0.01; velX = dy * 0.01;
+  prevX = x; prevY = y;
+}
+function onUp(x, y) {
+  if (dragging && !moved && !liftedMan) {
+    const man = pickMan(x, y);
+    if (man) liftMan(man);
+  }
+  dragging = false;
+}
+
+renderer.domElement.addEventListener('mousedown', e => onDown(e.clientX, e.clientY));
+window.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+window.addEventListener('mouseup', e => onUp(e.clientX, e.clientY));
+renderer.domElement.addEventListener('touchstart', e => {
+  const t = e.touches[0]; onDown(t.clientX, t.clientY);
+}, { passive:true });
+renderer.domElement.addEventListener('touchmove', e => {
+  const t = e.touches[0]; onMove(t.clientX, t.clientY);
+}, { passive:true });
+window.addEventListener('touchend', e => {
+  const t = e.changedTouches[0]; onUp(t.clientX, t.clientY);
+});
+
+/* =========================================================
+   ЧАТ
+   ========================================================= */
+const chatlog = document.getElementById('chatlog');
+let speakerIndex = 0;
+const GREETINGS = ['Привет', 'Привет!', 'Привет :)', 'Привет всем!'];
+
+function addChatRow(man, text) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `
+    <span class="dot" style="background:${colorHex(man.userData.color)}"></span>
+    <span class="name">${man.userData.name} <span style="color:#ffd54f;opacity:.85">lv${man.userData.level}</span></span>
+    <span class="msg">${text}</span>
+  `;
+  chatlog.appendChild(row);
+  chatlog.scrollTop = chatlog.scrollHeight;
+  while (chatlog.children.length > 20) chatlog.removeChild(chatlog.firstChild);
+}
+function tickChat() {
+  let man = legoMen[speakerIndex % legoMen.length];
+  if (man.userData.state !== 'idle') {
+    speakerIndex++;
+    man = legoMen[speakerIndex % legoMen.length];
+  }
+  const text = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+  addChatRow(man, text);
+  speakerIndex++;
+  setTimeout(tickChat, 1800);
+}
+setTimeout(tickChat, 1200);
+
+/* =========================================================
+   АНИМАЦИЯ
+   ========================================================= */
+function animate() {
+  requestAnimationFrame(animate);
+  if (liftAnim) liftAnim();
+  else if (groupAnim) groupAnim();
+  else if (!dragging && !liftedMan) {
+    group.rotation.y += velY;
+    group.rotation.x += velX;
+    velY *= 0.97; velX *= 0.97;
+    group.rotation.y += 0.003;
+  } else if (liftedMan && liftedMan.userData.state === 'lifted') {
+    const t = performance.now() * 0.001;
+    liftedMan.rotation.y = Math.sin(t * 0.7) * 0.15;
+    liftedMan.rotation.x = Math.sin(t * 1.1) * 0.03;
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
